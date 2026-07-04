@@ -12,6 +12,9 @@ import BillingPage from './pages/BillingPage';
 import ExpensesPage from './pages/ExpensesPage';
 import SettingsPage from './pages/SettingsPage';
 import StudentProfilePage from './pages/StudentProfilePage';
+import LandingPage from './pages/LandingPage';
+import DailyMenuPage from './pages/DailyMenuPage';
+import LeavesOverviewPage from './pages/LeavesOverviewPage';
 
 function ProtectedRoute({ children, ownerOnly = false }) {
   const { user, isOwner } = useAuth();
@@ -24,11 +27,11 @@ function AppRoutes() {
   const { user, isOwner } = useAuth();
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to={isOwner ? "/dashboard" : "/my-calendar"} replace /> : <LoginPage />} />
+      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
 
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-        {/* Owner routes */}
-        <Route path="/dashboard" element={<ProtectedRoute ownerOnly><DashboardPage /></ProtectedRoute>} />
+        {/* Shared Dashboard Route */}
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/students" element={<ProtectedRoute ownerOnly><StudentsPage /></ProtectedRoute>} />
         <Route path="/students/add" element={<ProtectedRoute ownerOnly><AddStudentPage /></ProtectedRoute>} />
         <Route path="/students/:id" element={<StudentProfilePage />} />
@@ -40,13 +43,14 @@ function AppRoutes() {
         <Route path="/expenses" element={<ProtectedRoute ownerOnly><ExpensesPage /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute ownerOnly><DashboardPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute ownerOnly><SettingsPage /></ProtectedRoute>} />
+        <Route path="/daily-menu" element={<ProtectedRoute ownerOnly><DailyMenuPage /></ProtectedRoute>} />
 
         {/* Student routes */}
         <Route path="/my-calendar" element={<Navigate to={user?.studentId ? `/calendar/${user.studentId}` : '/login'} replace />} />
         <Route path="/my-balance" element={<Navigate to={user?.studentId ? `/billing/${user.studentId}` : '/login'} replace />} />
       </Route>
 
-      <Route path="/" element={<Navigate to={user ? (isOwner ? "/dashboard" : "/my-calendar") : "/login"} replace />} />
+      <Route path="/" element={<LandingPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

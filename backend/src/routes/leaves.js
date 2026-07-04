@@ -26,33 +26,77 @@ router.post('/', authenticate, async (req, res) => {
 
     const leave = leaveResult.rows[0];
 
-    // Apply overrides to daily_meal_calendar
-    const mealsToSkip = [];
-    if (skip_breakfast) mealsToSkip.push('BREAKFAST');
-    if (skip_lunch)     mealsToSkip.push('LUNCH');
-    if (skip_dinner)    mealsToSkip.push('DINNER');
+    // Apply overrides or insert skipped meals in daily_meal_calendar
+    const parseLocalDate = (dateStr) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    };
+    
+    const formatLocalDate = (dateObj) => {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
+    const start = parseLocalDate(start_date);
+    const end = parseLocalDate(end_date);
+
+    // Fetch default prices
+    const settingsRes = await client.query("SELECT key, value FROM settings WHERE key IN ('breakfast_price', 'lunch_price', 'dinner_price')");
+    const prices = {};
+    settingsRes.rows.forEach(r => { prices[r.key] = parseFloat(r.value); });
 
     let skipped = 0;
-    for (const mealType of mealsToSkip) {
-      const result = await client.query(`
-        UPDATE daily_meal_calendar
-        SET status = 'SKIPPED', updated_at = NOW()
-        WHERE student_id = $1
-          AND meal_date BETWEEN $2 AND $3
-          AND meal_type = $4
-          AND is_locked = FALSE
-          AND status = 'SCHEDULED'
-        RETURNING *
-      `, [student_id, start_date, end_date, mealType]);
+    let curr = new Date(start);
+    while (curr <= end) {
+      const dateStr = formatLocalDate(curr);
 
-      // Log each skipped meal
-      for (const meal of result.rows) {
-        await client.query(`
-          INSERT INTO meal_skip_log (student_id, meal_date, meal_type, initiated_by, initiated_by_user_id, leave_id, reason, price_deducted)
-          VALUES ($1,$2,$3,'SYSTEM_LEAVE',$4,$5,$6,$7)
-        `, [student_id, meal.meal_date, mealType, req.user.id, leave.id, reason, meal.price]);
-        skipped++;
+      const meals = [
+        { type: 'BREAKFAST', active: skip_breakfast, price: prices.breakfast_price || 0 },
+        { type: 'LUNCH',     active: skip_lunch,     price: prices.lunch_price || 0 },
+        { type: 'DINNER',    active: skip_dinner,    price: prices.dinner_price || 0 }
+      ];
+
+      for (const meal of meals) {
+        if (!meal.active) continue;
+
+        // Check if record exists
+        const existing = await client.query(
+          'SELECT id, status, is_locked FROM daily_meal_calendar WHERE student_id = $1 AND meal_date = $2 AND meal_type = $3',
+          [student_id, dateStr, meal.type]
+        );
+
+        if (existing.rows[0]) {
+          const record = existing.rows[0];
+          if (!record.is_locked && record.status === 'SCHEDULED') {
+            await client.query(
+              "UPDATE daily_meal_calendar SET status = 'SKIPPED', updated_at = NOW() WHERE id = $1",
+              [record.id]
+            );
+            await client.query(`
+              INSERT INTO meal_skip_log (student_id, meal_date, meal_type, initiated_by, initiated_by_user_id, leave_id, reason, price_deducted)
+              VALUES ($1,$2,$3,'SYSTEM_LEAVE',$4,$5,$6,$7)
+            `, [student_id, dateStr, meal.type, req.user.id, leave.id, reason, meal.price]);
+            skipped++;
+          }
+        } else {
+          // Record doesn't exist yet, insert it as SKIPPED
+          await client.query(`
+            INSERT INTO daily_meal_calendar (student_id, meal_date, meal_type, price, status)
+            VALUES ($1, $2, $3, $4, 'SKIPPED')
+          `, [student_id, dateStr, meal.type, meal.price]);
+
+          await client.query(`
+            INSERT INTO meal_skip_log (student_id, meal_date, meal_type, initiated_by, initiated_by_user_id, leave_id, reason, price_deducted)
+            VALUES ($1,$2,$3,'SYSTEM_LEAVE',$4,$5,$6,$7)
+          `, [student_id, dateStr, meal.type, req.user.id, leave.id, reason, meal.price]);
+          skipped++;
+        }
       }
+
+      // Advance by 1 day
+      curr.setDate(curr.getDate() + 1);
     }
 
     await client.query('COMMIT');

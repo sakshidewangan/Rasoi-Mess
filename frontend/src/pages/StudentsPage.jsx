@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import api from '../lib/api';
 import {
   UserPlus, Search, Filter, Phone, Home, Coffee, Sun, Moon,
@@ -13,7 +13,7 @@ const STATUS_BADGE = {
   INACTIVE: { cls: 'badge-gray',   label: 'Inactive' },
 };
 
-function StudentCard({ student, onStatusChange }) {
+function StudentCard({ student, onStatusChange, isCalendarView }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const badge = STATUS_BADGE[student.status] || STATUS_BADGE.INACTIVE;
 
@@ -28,7 +28,7 @@ function StudentCard({ student, onStatusChange }) {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Link to={`/students/${student.id}`} className="font-semibold text-white hover:text-brand-400 transition-colors text-sm">
+            <Link to={isCalendarView ? `/calendar/${student.id}` : `/students/${student.id}`} className="font-semibold text-white hover:text-brand-400 transition-colors text-sm">
               {student.name}
             </Link>
             <span className={`badge ${badge.cls}`}>{badge.label}</span>
@@ -103,6 +103,8 @@ export default function StudentsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const navigate = useNavigate();
+  const location = useLocation();
+  const isCalendarView = location.pathname.startsWith('/calendar');
 
   const fetchStudents = () => {
     setLoading(true);
@@ -131,10 +133,14 @@ export default function StudentsPage() {
     <div className="p-4 lg:p-6 space-y-4 max-w-3xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-bold text-white">Students</h1>
-        <button onClick={() => navigate('/students/add')} className="btn-primary">
-          <UserPlus size={16} /> Add
-        </button>
+        <h1 className="text-xl font-bold text-white">
+          {isCalendarView ? 'Meal Calendar' : 'Students'}
+        </h1>
+        {!isCalendarView && (
+          <button onClick={() => navigate('/students/add')} className="btn-primary">
+            <UserPlus size={16} /> Add
+          </button>
+        )}
       </div>
 
       {/* Search & Filter */}
@@ -142,14 +148,16 @@ export default function StudentsPage() {
         <div className="relative flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
           <input
-            className="input-field pl-9"
+            className="input-field"
+            style={{ paddingLeft: '2.25rem' }}
             placeholder="Search name, phone, room..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
         <select
-          className="input-field w-auto px-3 cursor-pointer"
+          className="input-field cursor-pointer flex-shrink-0"
+          style={{ width: '120px' }}
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
         >
@@ -176,7 +184,7 @@ export default function StudentsPage() {
       ) : (
         <div className="space-y-2.5">
           {students.map(s => (
-            <StudentCard key={s.id} student={s} onStatusChange={handleStatusChange} />
+            <StudentCard key={s.id} student={s} onStatusChange={handleStatusChange} isCalendarView={isCalendarView} />
           ))}
         </div>
       )}

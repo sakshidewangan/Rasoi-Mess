@@ -9,6 +9,14 @@ router.get('/:studentId', authenticate, async (req, res) => {
   try {
     const { studentId } = req.params;
     const { month } = req.query;
+    const today = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Auto-mark past SCHEDULED meals as SERVED
+    await query(`
+      UPDATE daily_meal_calendar
+      SET status = 'SERVED', updated_at = NOW()
+      WHERE student_id = $1 AND meal_date < $2 AND status = 'SCHEDULED'
+    `, [studentId, today]);
 
     if (req.user.role === 'STUDENT' && req.user.studentId !== parseInt(studentId)) {
       return res.status(403).json({ message: 'Access denied' });

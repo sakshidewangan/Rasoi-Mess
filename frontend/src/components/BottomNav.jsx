@@ -11,8 +11,9 @@ const ownerNav = [
 ];
 
 const studentNav = [
-  { to: '/my-calendar', icon: CalendarDays, label: 'Calendar' },
-  { to: '/my-balance',  icon: CreditCard,   label: 'Balance' },
+  { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/my-calendar', icon: CalendarDays,    label: 'Calendar' },
+  { to: '/my-balance',  icon: CreditCard,      label: 'Balance' },
 ];
 
 export default function BottomNav() {

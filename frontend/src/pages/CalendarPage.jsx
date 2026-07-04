@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import api from '../lib/api';
 import {
   ArrowLeft, Coffee, Sun, Moon, Plus, CalendarDays,
@@ -20,24 +21,61 @@ const MEAL_STATUS = {
 function MealCell({ meal, onClick }) {
   if (!meal) return <div className="w-7 h-5 rounded opacity-20" />;
   const s = MEAL_STATUS[meal.status] || MEAL_STATUS.SCHEDULED;
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  useEffect(() => {
+    if (showTooltip) {
+      const t = setTimeout(() => setShowTooltip(false), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [showTooltip]);
+
+  const statusLabel = 
+    meal.status === 'SERVED' ? 'Served' :
+    meal.status === 'SKIPPED' || meal.status === 'CANCELLED' ? 'Skipped' :
+    meal.status === 'SCHEDULED' ? 'Scheduled' : meal.status;
+
+  const tooltipText = `${meal.meal_type} - ${statusLabel.toUpperCase()}`;
+
   return (
-    <button
-      onClick={() => onClick(meal)}
-      className={`w-7 h-5 rounded text-[9px] font-bold border ${
-        meal.status === 'SERVED'    ? 'bg-green-500/20 border-green-500/30 text-green-400' :
-        meal.status === 'SKIPPED' || meal.status === 'CANCELLED' ? 'bg-red-500/20 border-red-500/30 text-red-400' :
-        meal.status === 'SCHEDULED' ? 'bg-yellow-500/15 border-yellow-500/20 text-yellow-400' :
-        'bg-white/5 border-white/5 text-white/20'
-      } hover:scale-110 transition-transform`}
-      title={`${meal.meal_type} - ${meal.status}`}
-    >
-      {s.label}
-    </button>
+    <div className="relative flex items-center justify-center">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowTooltip(!showTooltip);
+          onClick(meal);
+        }}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        className={`w-7 h-5 rounded text-[9px] font-bold border ${
+          meal.status === 'SERVED'    ? 'bg-green-500/20 border-green-500/30 text-green-400' :
+          meal.status === 'SKIPPED' || meal.status === 'CANCELLED' ? 'bg-red-500/20 border-red-500/30 text-red-400' :
+          meal.status === 'SCHEDULED' ? 'bg-yellow-500/15 border-yellow-500/20 text-yellow-400' :
+          'bg-white/5 border-white/5 text-white/20'
+        } hover:scale-110 transition-transform`}
+      >
+        {s.label}
+      </button>
+
+      {/* Custom Tooltip */}
+      {showTooltip && (
+        <div 
+          className="absolute z-30 bottom-full mb-1.5 px-2 py-1 text-[9px] font-bold whitespace-nowrap bg-surface-900 border border-white/10 rounded shadow-lg text-white pointer-events-none transition-opacity duration-150"
+          style={{ left: '50%', transform: 'translateX(-50%)' }}
+        >
+          {tooltipText}
+          {/* Arrow */}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-surface-900" />
+        </div>
+      )}
+    </div>
   );
 }
 
 export default function CalendarPage() {
-  const { id: studentId } = useParams();
+  const { user, isOwner } = useAuth();
+  const { id } = useParams();
+  const studentId = id || user?.studentId;
   const navigate = useNavigate();
   const [student, setStudent] = useState(null);
   const [meals, setMeals] = useState([]);
@@ -68,7 +106,11 @@ export default function CalendarPage() {
   const daysInMonth = new Date(year, mon, 0).getDate();
   const firstDay = new Date(year, mon - 1, 1).getDay();
 
-  const handleMealClick = (meal) => setSelectedMeal(meal);
+  const handleMealClick = (meal) => {
+    if (isOwner) {
+      setSelectedMeal(meal);
+    }
+  };
 
   const handleStatusUpdate = async (newStatus) => {
     try {
@@ -102,9 +144,11 @@ export default function CalendarPage() {
     <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/5 transition-colors">
-          <ArrowLeft size={20} />
-        </button>
+        {isOwner && (
+          <button onClick={() => navigate(-1)} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/5 transition-colors">
+            <ArrowLeft size={20} />
+          </button>
+        )}
         <div>
           <h1 className="text-lg font-bold text-white">{student?.name}'s Calendar</h1>
           <div className="flex items-center gap-3 mt-0.5 text-xs text-white/40">
@@ -123,9 +167,11 @@ export default function CalendarPage() {
 
       {/* Actions */}
       <div className="flex gap-2 flex-wrap">
-        <button onClick={generateCalendar} className="btn-secondary text-xs">
-          <CalendarDays size={14} /> Generate Month
-        </button>
+        {isOwner && (
+          <button onClick={generateCalendar} className="btn-secondary text-xs">
+            <CalendarDays size={14} /> Generate Month
+          </button>
+        )}
         <button onClick={() => setShowLeave(true)} className="btn-secondary text-xs">
           <Plus size={14} /> Add Leave
         </button>
@@ -172,6 +218,37 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      {/* Skipped Meals List Card */}
+      <div className="card p-4 border border-red-500/10 bg-gradient-to-b from-red-950/10 to-transparent">
+        <h3 className="text-sm font-semibold text-red-400/85 mb-3 uppercase tracking-wider flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+          Skipped Meals Log ({meals.filter(m => m.status === 'SKIPPED' || m.status === 'CANCELLED').length} total)
+        </h3>
+        {meals.filter(m => m.status === 'SKIPPED' || m.status === 'CANCELLED').length === 0 ? (
+          <p className="text-white/30 text-xs text-center py-4">No skipped meals recorded this month</p>
+        ) : (
+          <div className="max-h-48 overflow-y-auto space-y-2 pr-1 divide-y divide-white/5">
+            {meals.filter(m => m.status === 'SKIPPED' || m.status === 'CANCELLED')
+              .sort((a, b) => new Date(b.meal_date) - new Date(a.meal_date))
+              .map((m, idx) => {
+                const mealDate = new Date(m.meal_date);
+                const formattedDate = format(mealDate, 'EEEE, d MMMM yyyy');
+                return (
+                  <div key={m.id || idx} className="flex justify-between items-center text-xs py-2 text-white/70">
+                    <div>
+                      <span className="font-medium text-white">{formattedDate}</span>
+                      <span className="text-white/40 ml-2">· {m.meal_type}</span>
+                    </div>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                      SKIPPED
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        )}
+      </div>
+
       {/* Summary */}
       <div className="card p-4">
         <h3 className="text-sm font-semibold text-white/50 mb-3 uppercase tracking-wider">Month Summary</h3>
@@ -197,34 +274,6 @@ export default function CalendarPage() {
           <span className="text-lg font-bold text-brand-400">₹{totalAmt.toLocaleString('en-IN')}</span>
         </div>
       </div>
-
-      {/* Meal Edit Modal */}
-      {selectedMeal && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-end lg:items-center justify-center p-4" onClick={() => setSelectedMeal(null)}>
-          <div className="bg-surface-800 rounded-2xl p-5 w-full max-w-xs shadow-2xl" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bold text-white mb-1">
-              {selectedMeal.meal_type} · {format(new Date(selectedMeal.meal_date), 'd MMM')}
-            </h3>
-            <p className="text-xs text-white/40 mb-4">₹{selectedMeal.price} · Currently: <span className="text-white">{selectedMeal.status}</span></p>
-            <div className="grid grid-cols-2 gap-2">
-              {['SERVED', 'SCHEDULED', 'SKIPPED', 'CANCELLED', 'WASTED'].map(s => (
-                <button
-                  key={s}
-                  onClick={() => handleStatusUpdate(s)}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                    s === selectedMeal.status
-                      ? 'border-brand-500 bg-brand-500/20 text-brand-300'
-                      : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setSelectedMeal(null)} className="btn-secondary w-full justify-center mt-3 text-sm">Cancel</button>
-          </div>
-        </div>
-      )}
 
       {/* Leave Modal */}
       {showLeave && <LeaveModal studentId={studentId} onClose={() => setShowLeave(false)} onSuccess={() => {

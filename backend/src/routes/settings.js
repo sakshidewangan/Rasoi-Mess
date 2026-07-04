@@ -33,9 +33,17 @@ router.put('/', authenticate, requireOwner, async (req, res) => {
 });
 
 // GET /api/settings/dashboard — full dashboard stats
-router.get('/dashboard', authenticate, requireOwner, async (req, res) => {
+router.get('/dashboard', authenticate, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Auto-mark past SCHEDULED meals as SERVED
+    await query(`
+      UPDATE daily_meal_calendar
+      SET status = 'SERVED', updated_at = NOW()
+      WHERE meal_date < $1 AND status = 'SCHEDULED'
+    `, [today]);
+
     const thisMonth = today.substring(0, 7);
 
     const [kitchen, onLeave, activeStudents, pendingDues, todayExpenses, recentPayments] = await Promise.all([
@@ -56,16 +64,40 @@ router.get('/dashboard', authenticate, requireOwner, async (req, res) => {
     const kitchenSummary = { BREAKFAST: 0, LUNCH: 0, DINNER: 0 };
     kitchen.rows.forEach(r => { kitchenSummary[r.meal_type] = parseInt(r.total); });
 
+    let studentSkips = 0;
+    let studentBalance = 0;
+    let studentPayments = [];
+    let studentTodayMeals = [];
+
+    if (req.user.role === 'STUDENT' && req.user.studentId) {
+      const todayStr = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const [skipsRes, balanceRes, paymentsRes, todayMealsRes] = await Promise.all([
+        query(`SELECT COUNT(*) as count FROM daily_meal_calendar WHERE student_id=$1 AND status='SKIPPED'`, [req.user.studentId]),
+        query(`SELECT current_balance FROM students WHERE id=$1`, [req.user.studentId]),
+        query(`SELECT p.*, s.name as student_name FROM payments p
+               JOIN students s ON p.student_id=s.id
+               WHERE p.student_id=$1
+               ORDER BY p.created_at DESC LIMIT 5`, [req.user.studentId]),
+        query(`SELECT id, meal_type, status, is_locked FROM daily_meal_calendar WHERE student_id=$1 AND meal_date=$2`, [req.user.studentId, todayStr])
+      ]);
+      studentSkips = parseInt(skipsRes.rows[0]?.count || 0);
+      studentBalance = parseFloat(balanceRes.rows[0]?.current_balance || 0);
+      studentPayments = paymentsRes.rows;
+      studentTodayMeals = todayMealsRes.rows;
+    }
+
     res.json({
       kitchenSummary,
-      studentsOnLeave: parseInt(onLeave.rows[0]?.count || 0),
+      studentsOnLeave: req.user.role === 'OWNER' ? parseInt(onLeave.rows[0]?.count || 0) : studentSkips,
       activeStudents: parseInt(activeStudents.rows[0]?.count || 0),
       pendingDues: {
-        count: parseInt(pendingDues.rows[0]?.count || 0),
-        total: parseFloat(pendingDues.rows[0]?.total || 0),
+        count: req.user.role === 'OWNER' ? parseInt(pendingDues.rows[0]?.count || 0) : 1,
+        total: req.user.role === 'OWNER' ? parseFloat(pendingDues.rows[0]?.total || 0) : studentBalance,
       },
       todayExpenses: parseFloat(todayExpenses.rows[0]?.total || 0),
-      recentPayments: recentPayments.rows,
+      recentPayments: req.user.role === 'OWNER' ? recentPayments.rows : studentPayments,
+      studentTodayMeals,
       date: today,
     });
   } catch (err) {

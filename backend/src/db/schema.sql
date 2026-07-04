@@ -154,6 +154,16 @@ CREATE TABLE IF NOT EXISTS monthly_bill_snapshots (
     UNIQUE (student_id, billing_month)
 );
 
+-- Weekly Menu Items
+CREATE TABLE IF NOT EXISTS weekly_menu (
+    id SERIAL PRIMARY KEY,
+    day_of_week VARCHAR(10) NOT NULL CHECK (day_of_week IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')),
+    meal_type VARCHAR(10) NOT NULL CHECK (meal_type IN ('BREAKFAST', 'LUNCH', 'DINNER')),
+    items TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (day_of_week, meal_type)
+);
+
 -- =============================================================
 -- DEFAULT SEED DATA
 -- =============================================================
@@ -174,3 +184,28 @@ ON CONFLICT (key) DO NOTHING;
 INSERT INTO users (name, phone, password_hash, role) VALUES
     ('Rasoi Owner', '9999999999', '$2b$10$muPCtXOFkAejuB.XqAPUUe9B/YkZChonxrFn4gFfFH458YgTUXume', 'OWNER')
 ON CONFLICT (phone) DO NOTHING;
+
+-- Default Weekly Menu Seed Data
+INSERT INTO weekly_menu (day_of_week, meal_type, items) VALUES
+    ('Monday', 'BREAKFAST', 'Poha, Jalebi, Tea'),
+    ('Monday', 'LUNCH', 'Dal Fry, Aloo Gobhi, Jeera Rice, Roti, Salad'),
+    ('Monday', 'DINNER', 'Paneer Bhurji, Plain Paratha, Rice, Dal Fry'),
+    ('Tuesday', 'BREAKFAST', 'Idli Sambhar, Coconut Chutney, Tea'),
+    ('Tuesday', 'LUNCH', 'Rajma Masala, Mix Veg, Steamed Rice, Roti, Curd'),
+    ('Tuesday', 'DINNER', 'Kadhi Pakoda, Bhindi Masala, Steamed Rice, Roti'),
+    ('Wednesday', 'BREAKFAST', 'Aloo Paratha, Butter, Curd, Tea'),
+    ('Wednesday', 'LUNCH', 'Chana Masala, Lauki Kofta, Jeera Rice, Roti, Salad'),
+    ('Wednesday', 'DINNER', 'Paneer Butter Masala, Rice, Roti, Dal Fry'),
+    ('Thursday', 'BREAKFAST', 'Bread Toast, Butter, Jam, Bananas, Tea'),
+    ('Thursday', 'LUNCH', 'Dal Makhani, Aloo Pyaz Sukhi Sabji, Rice, Roti, Salad'),
+    ('Thursday', 'DINNER', 'Dum Aloo, Dal Tadka, Rice, Roti, Kheer'),
+    ('Friday', 'BREAKFAST', 'Methi Thepla, Pickle, Curd, Tea'),
+    ('Friday', 'LUNCH', 'Choole Bhature, Pulao, Raita, Salad'),
+    ('Friday', 'DINNER', 'Veg Biryani, Salan, Raita, Salad'),
+    ('Saturday', 'BREAKFAST', 'Onion Uttapam, Tomato Chutney, Tea'),
+    ('Saturday', 'LUNCH', 'Kadi Chawal, Aloo Beans, Roti, Salad'),
+    ('Saturday', 'DINNER', 'Paneer Butter Masala, Butter Naan, Veg Pulao, Dal Fry'),
+    ('Sunday', 'BREAKFAST', 'Puri Sabji, Halwa, Tea'),
+    ('Sunday', 'LUNCH', 'Spl. Dal Bati Churma, Pulao, Salad'),
+    ('Sunday', 'DINNER', 'Pav Bhaji, Light Khichdi Kadhi')
+ON CONFLICT (day_of_week, meal_type) DO NOTHING;
