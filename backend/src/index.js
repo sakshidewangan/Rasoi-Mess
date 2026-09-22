@@ -1,19 +1,19 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { query } from './db/pool.js';
-import authRoutes from './routes/auth.js';
-import studentRoutes from './routes/students.js';
-import calendarRoutes from './routes/calendar.js';
-import leaveRoutes from './routes/leaves.js';
-import billingRoutes from './routes/billing.js';
-import paymentRoutes from './routes/payments.js';
-import expenseRoutes from './routes/expenses.js';
-import settingsRoutes from './routes/settings.js';
-import menuRoutes from './routes/menu.js';
-import excelRoutes from './routes/excel.js';
-import zoneRoutes from './routes/zones.js';
-import { syncToFirestore, backupDatabaseFile } from './db/backup.js';
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import { query } from "./db/pool.js";
+import authRoutes from "./routes/auth.js";
+import studentRoutes from "./routes/students.js";
+import calendarRoutes from "./routes/calendar.js";
+import leaveRoutes from "./routes/leaves.js";
+import billingRoutes from "./routes/billing.js";
+import paymentRoutes from "./routes/payments.js";
+import expenseRoutes from "./routes/expenses.js";
+import settingsRoutes from "./routes/settings.js";
+import menuRoutes from "./routes/menu.js";
+import excelRoutes from "./routes/excel.js";
+import zoneRoutes from "./routes/zones.js";
+import { syncToFirestore, backupDatabaseFile } from "./db/backup.js";
 
 dotenv.config();
 
@@ -23,14 +23,36 @@ const PORT = Number(process.env.PORT || 5000);
 // Middleware
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        "http://localhost:5173",
+        "https://rasoi-mess-frontend.vercel.app",
+      ];
+
+      // Allow requests without an origin
+      // and the main frontend + Vercel deployment URLs
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        /^https:\/\/rasoi-mess-frontend-[a-z0-9-]+-sakshi-2d81\.vercel\.app$/.test(
+          origin,
+        )
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   }),
 );
+
 app.use(express.json());
 
 app.use((req, res, next) => {
-  console.log(`[REQUEST] ${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(
+    `[REQUEST] ${new Date().toISOString()} - ${req.method} ${req.path}`,
+  );
   next();
 });
 
@@ -76,7 +98,7 @@ const startServer = (port) => {
 
     // Attempt automatic backup/sync on start (asynchronous, doesn't block startup)
     setTimeout(async () => {
-      console.log('⏰ Running startup automatic cloud backup...');
+      console.log("⏰ Running startup automatic cloud backup...");
       await syncToFirestore();
       await backupDatabaseFile();
     }, 5000);
