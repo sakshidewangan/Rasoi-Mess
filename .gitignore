@@ -30,3 +30,6 @@ Thumbs.db
 .agents/
 .gemini/
 scratch/
+
+backend/rasoi_db.sqlite-shm
+backend/rasoi_db.sqlite-wal
