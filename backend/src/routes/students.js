@@ -84,7 +84,7 @@ router.post('/', authenticate, requireOwner, async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       RETURNING *
     `, [name, mobile, guardian_mobile, college, hostel, room_number,
-        google_map_link, delivery_zone_id, credit_limit || 1000, veg_status || 'VEG',
+        google_map_link, delivery_zone_id || null, credit_limit || 1000, veg_status || 'VEG',
         academic_session, joining_date, remarks, photo_url]);
 
     const student = studentResult.rows[0];
@@ -111,7 +111,10 @@ router.post('/', authenticate, requireOwner, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    if (err.code === '23505') return res.status(400).json({ message: 'Mobile number already exists' });
+    // Handle duplicate mobile: PostgreSQL code 23505, SQLite code SQLITE_CONSTRAINT
+    if (err.code === '23505' || err.code === 'SQLITE_CONSTRAINT') {
+      return res.status(400).json({ message: 'Mobile number already exists' });
+    }
     res.status(500).json({ message: 'Server error' });
   } finally {
     client.release();

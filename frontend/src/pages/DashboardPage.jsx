@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import {
-  UtensilsCrossed, Users, AlertCircle, TrendingDown,
-  CreditCard, ArrowRight, Coffee, Sun, Moon, CalendarDays,
-  ChevronDown, ChevronUp, Search
+  UtensilsCrossed, Users,
+  ArrowRight, Coffee, Sun, Moon, CalendarDays,
+  ChevronDown, ChevronUp, Search, Check, X, MapPinned, ChevronLeft
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
@@ -64,7 +64,6 @@ function KitchenCard({ icon: Icon, label, count, onClick, status, isOwner, cutof
           ) : (
             <p className="text-xl font-bold text-white">{count}</p>
           )}
-          <p className="text-[10px] text-brand-400 hover:underline">View Menu</p>
         </div>
       </div>
     </button>
@@ -72,23 +71,25 @@ function KitchenCard({ icon: Icon, label, count, onClick, status, isOwner, cutof
 }
 
 function LeavesModal({ onClose }) {
-  const [data, setData] = useState([]);
+  const [data, setData] = useState({ today: [] });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [expandedStudent, setExpandedStudent] = useState(null);
-  const navigate = useNavigate(); // For navigating to calendar from inside modal
+  const navigate = useNavigate();
 
   useEffect(() => {
     api.get('/calendar/leaves/summary')
       .then(res => setData(res.data))
-      .catch(() => toast.error('Failed to load leaves summary'))
+      .catch(() => toast.error('Failed to load summary'))
       .finally(() => setLoading(false));
   }, []);
 
-  const filteredData = data.filter(student => {
-    const nameMatch = student.name ? student.name.toLowerCase().includes(search.toLowerCase()) : false;
-    const roomMatch = student.room_number ? String(student.room_number).includes(search) : false;
-    const mobileMatch = student.mobile ? String(student.mobile).includes(search) : false;
+  const activeList = data.today || [];
+
+  const filteredData = activeList.filter(record => {
+    const nameMatch = record.student_name ? record.student_name.toLowerCase().includes(search.toLowerCase()) : false;
+    const roomMatch = record.student_room ? String(record.student_room).includes(search) : false;
+    const mobileMatch = record.student_mobile ? String(record.student_mobile).includes(search) : false;
     return nameMatch || roomMatch || mobileMatch;
   });
 
@@ -100,15 +101,15 @@ function LeavesModal({ onClose }) {
           <div>
             <h3 className="font-black text-white text-base flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-              Leaves & Skips Log
+              Unavailable Log
             </h3>
-            <p className="text-xs text-white/40 mt-0.5">Showing only students who have skipped meals or taken leaves</p>
+            <p className="text-xs text-white/40 mt-0.5">Showing today's unavailable students (leaves & student skips)</p>
           </div>
           <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl font-bold">×</button>
         </div>
 
         {/* Search */}
-        <div className="p-4 bg-surface-900/40 border-b border-white/5 flex items-center gap-3">
+        <div className="p-4 bg-surface-900/40 border-b border-white/5">
           <div className="relative w-full">
             <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-white/30">
               <Search size={14} />
@@ -133,54 +134,54 @@ function LeavesModal({ onClose }) {
           ) : filteredData.length === 0 ? (
             <p className="text-center text-white/30 text-xs py-8">No matching records found</p>
           ) : (
-            filteredData.map(student => {
-              const isExpanded = expandedStudent === student.student_id;
+            // Today list: expand/collapse arrow layout showing only unavailable meals today
+            filteredData.map(record => {
+              const isExpanded = expandedStudent === record.student_id;
               return (
-                <div key={student.student_id} className="border border-white/5 bg-white/5 rounded-xl overflow-hidden transition-all duration-200">
+                <div key={record.student_id} className="border border-white/5 bg-white/5 rounded-xl overflow-hidden transition-all duration-200">
                   <div 
-                    onClick={() => setExpandedStudent(isExpanded ? null : student.student_id)}
+                    onClick={() => setExpandedStudent(isExpanded ? null : record.student_id)}
                     className="p-3.5 flex items-center justify-between cursor-pointer select-none hover:bg-white/5 transition-colors"
                   >
                     <div>
-                      <h4 className="font-bold text-white text-sm">{student.name}</h4>
-                      <p className="text-[11px] text-white/40 mt-0.5">Room {student.room_number} · {student.mobile}</p>
+                      <h4 className="font-bold text-white text-sm">{record.student_name}</h4>
+                      <p className="text-[11px] text-white/40 mt-0.5">Room {record.student_room || 'N/A'} · {record.student_mobile || 'N/A'}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                        {student.skipped_count} skipped
-                      </span>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClose();
+                          navigate(`/calendar/${record.student_id}`);
+                        }}
+                        className="text-[10px] text-brand-400 hover:underline cursor-pointer font-bold"
+                      >
+                        Calendar
+                      </button>
                       {isExpanded ? <ChevronUp size={16} className="text-white/40" /> : <ChevronDown size={16} className="text-white/40" />}
                     </div>
                   </div>
 
                   {isExpanded && (
-                    <div className="bg-black/20 p-3 border-t border-white/5 space-y-2">
-                      <div className="divide-y divide-white/5 max-h-48 overflow-y-auto pr-1">
-                        {student.skips.map((skip, idx) => {
-                          const dateObj = new Date(skip.meal_date);
-                          const formattedDate = format(dateObj, 'EEEE, d MMM yyyy');
+                    <div className="bg-black/20 p-4 border-t border-white/5 space-y-2 text-xs text-left">
+                      {[
+                        { label: 'Breakfast', key: 'breakfast' },
+                        { label: 'Lunch', key: 'lunch' },
+                        { label: 'Dinner', key: 'dinner' }
+                      ]
+                        .filter(meal => record[meal.key].unavailable)
+                        .map(meal => {
+                          const mealInfo = record[meal.key];
                           return (
-                            <div key={skip.meal_id || idx} className="flex justify-between items-center text-[11px] py-1.5 text-white/70">
-                              <span>{formattedDate} · {skip.meal_type}</span>
-                              <span className="text-red-400 font-medium">SKIPPED</span>
+                            <div key={meal.key} className="flex justify-between items-center py-1.5 border-b border-white/5 last:border-b-0">
+                              <span className="font-semibold text-white/80">{meal.label}</span>
+                              <div className="text-right">
+                                <span className="text-red-400 font-semibold">Unavailable</span>
+                                <p className="text-[10px] text-white/40 mt-0.5">Reason: {mealInfo.reason}</p>
+                              </div>
                             </div>
                           );
                         })}
-                      </div>
-                      
-                      {/* View Calendar Button */}
-                      <div className="pt-2 flex justify-end">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onClose();
-                            navigate(`/calendar/${student.student_id}`);
-                          }}
-                          className="btn-secondary text-[10px] py-1 px-2.5 cursor-pointer"
-                        >
-                          View Full Calendar
-                        </button>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -203,7 +204,9 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [menu, setMenu] = useState([]);
   const [selectedMenuMeal, setSelectedMenuMeal] = useState(null);
+  const [selectedDeliveryMeal, setSelectedDeliveryMeal] = useState(null);
   const [showConfirmSkip, setShowConfirmSkip] = useState(null);
+  const [skipReason, setSkipReason] = useState('');
   const [showLeavesModal, setShowLeavesModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingToggle, setSavingToggle] = useState(false);
@@ -263,10 +266,10 @@ export default function DashboardPage() {
     return record ? !!record.is_locked : false;
   };
 
-  const handleToggleTodaySelection = async (mealType, status) => {
+  const handleToggleTodaySelection = async (mealType, status, reason = '') => {
     setSavingToggle(true);
     try {
-      await api.put('/calendar/today-toggle', { meal_type: mealType, status });
+      await api.put('/calendar/today-toggle', { meal_type: mealType, status, reason });
       toast.success('Selection updated successfully!');
       const res = await api.get('/settings/dashboard');
       setData(res.data);
@@ -278,8 +281,12 @@ export default function DashboardPage() {
   };
 
   const handleCardClick = (mealLabel, mealType) => {
-    const items = getTodayMenu(mealType);
-    setSelectedMenuMeal({ meal_type: mealLabel, type: mealType, items });
+    if (isOwner) {
+      setSelectedDeliveryMeal({ label: mealLabel, type: mealType });
+    } else {
+      const items = getTodayMenu(mealType);
+      setSelectedMenuMeal({ meal_type: mealLabel, type: mealType, items });
+    }
   };
 
   return (
@@ -329,7 +336,7 @@ export default function DashboardPage() {
       {/* Stats Grid */}
       <section>
         <h2 className="text-sm font-semibold text-white/40 uppercase tracking-wider mb-3">Overview</h2>
-        <div className={`grid grid-cols-2 ${isOwner ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
+        <div className="grid grid-cols-2 gap-3">
           {isOwner && (
             <StatCard
               icon={Users} label="Active Students" color="green"
@@ -339,60 +346,16 @@ export default function DashboardPage() {
           )}
           <StatCard
             icon={CalendarDays}
-            label={isOwner ? "On Leave Today" : "Meal Status Overview"}
+            label={isOwner ? "Unavailable Today" : "Meal Status Overview"}
             color="yellow"
             value={data?.studentsOnLeave ?? 0}
             sub={isOwner ? null : `${data?.studentsOnLeave ?? 0} meals missed`}
             onClick={isOwner ? () => setShowLeavesModal(true) : null}
             to={isOwner ? null : "/my-calendar"}
           />
-          <StatCard
-            icon={AlertCircle}
-            label="Pending Dues"
-            color="red"
-            value={`₹${data?.pendingDues?.total?.toLocaleString('en-IN') ?? 0}`}
-            sub={isOwner ? `${data?.pendingDues?.count ?? 0} students` : "Your Current Balance"}
-            to={isOwner ? "/billing" : "/my-balance"}
-          />
-          <StatCard
-            icon={TrendingDown}
-            label="Today's Expenses"
-            color="brand"
-            value={`₹${data?.todayExpenses?.toLocaleString('en-IN') ?? 0}`}
-            to={isOwner ? "/expenses" : null}
-          />
         </div>
       </section>
-
-      {/* Recent Payments */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-white/40 uppercase tracking-wider">Recent Payments</h2>
-          {isOwner && (
-            <Link to="/payments" className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
-              View all <ArrowRight size={12} />
-            </Link>
-          )}
-        </div>
-        <div className="card divide-y divide-white/5">
-          {data?.recentPayments?.length === 0 && (
-            <p className="text-white/30 text-sm px-4 py-6 text-center">No payments recorded yet</p>
-          )}
-          {data?.recentPayments?.map(p => (
-            <div key={p.id} className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-white">{p.student_name}</p>
-                <p className="text-xs text-white/30">{format(new Date(p.payment_date), 'd MMM yyyy')} · {p.payment_mode}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-bold text-green-400">+₹{parseFloat(p.amount).toLocaleString('en-IN')}</p>
-                <p className="text-xs text-white/25">{p.receipt_number}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
+
       {/* Daily Menu Modal */}
       {selectedMenuMeal && (
         <div 
@@ -468,7 +431,10 @@ export default function DashboardPage() {
       {showConfirmSkip && (
         <div 
           className="fixed inset-0 bg-black/85 z-[60] flex items-center justify-center p-4"
-          onClick={() => setShowConfirmSkip(null)}
+          onClick={() => {
+            setShowConfirmSkip(null);
+            setSkipReason('');
+          }}
         >
           <div 
             className="bg-surface-800 border border-red-500/20 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative text-center"
@@ -481,13 +447,24 @@ export default function DashboardPage() {
             <h3 className="font-bold text-white text-lg mb-2">
               Are you sure to skip the meal?
             </h3>
-            <p className="text-xs text-white/40 mb-6 leading-relaxed">
+            <p className="text-xs text-white/40 mb-4 leading-relaxed">
               Once skipped, this meal selection will be locked for today. You cannot undo this change.
             </p>
+
+            <input
+              type="text"
+              placeholder="Reason for skipping (optional)..."
+              className="input-field text-xs py-2.5 mb-5 w-full text-left bg-surface-900 border-white/10"
+              value={skipReason}
+              onChange={e => setSkipReason(e.target.value)}
+            />
             
             <div className="flex gap-3">
               <button 
-                onClick={() => setShowConfirmSkip(null)}
+                onClick={() => {
+                  setShowConfirmSkip(null);
+                  setSkipReason('');
+                }}
                 className="btn-secondary flex-1 justify-center text-xs cursor-pointer py-2.5"
               >
                 No, cancel
@@ -495,8 +472,10 @@ export default function DashboardPage() {
               <button 
                 onClick={async () => {
                   const meal = showConfirmSkip;
+                  const reasonText = skipReason;
                   setShowConfirmSkip(null);
-                  await handleToggleTodaySelection(meal, 'SKIPPED');
+                  setSkipReason('');
+                  await handleToggleTodaySelection(meal, 'SKIPPED', reasonText);
                 }}
                 className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex-1 justify-center cursor-pointer transition-colors"
               >
@@ -509,6 +488,200 @@ export default function DashboardPage() {
       {showLeavesModal && (
         <LeavesModal onClose={() => setShowLeavesModal(false)} />
       )}
+      {selectedDeliveryMeal && (
+        <DeliveryManagementModal 
+          meal={selectedDeliveryMeal} 
+          onClose={() => {
+            setSelectedDeliveryMeal(null);
+            api.get('/settings/dashboard').then(res => setData(res.data));
+          }} 
+        />
+      )}
+    </div>
+  );
+}
+
+function DeliveryManagementModal({ meal, onClose }) {
+  const [students, setStudents] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [zonesLoading, setZonesLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [selectedZone, setSelectedZone] = useState(null);
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState('pending'); // 'pending' or 'completed'
+  const [markingId, setMarkingId] = useState(null);
+
+  useEffect(() => {
+    api.get('/zones')
+      .then(res => setZones(res.data))
+      .catch(() => toast.error('Failed to load delivery zones'))
+      .finally(() => setZonesLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedZone) return;
+    setLoading(true);
+    api.get(`/calendar/delivery/list/${meal.type}?zone_id=${selectedZone.id}`)
+      .then(res => setStudents(res.data))
+      .catch(() => toast.error('Failed to load delivery list'))
+      .finally(() => setLoading(false));
+  }, [meal.type, selectedZone]);
+
+  const handleStatusUpdate = async (studentId, status) => {
+    setMarkingId(studentId);
+    try {
+      await api.put('/calendar/delivery/status', {
+        student_id: studentId,
+        meal_type: meal.type,
+        status: status
+      });
+      setStudents(prev => prev.map(s => s.student_id === studentId ? { ...s, status } : s));
+      toast.success(`Marked as ${status === 'SERVED' ? 'Delivered' : 'Not Delivered'}`);
+    } catch (err) {
+      toast.error('Failed to update status');
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
+  const filtered = students.filter(s => 
+    s.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const pending = filtered.filter(s => s.status === 'SCHEDULED');
+  const completed = filtered.filter(s => s.status === 'SERVED' || s.status === 'CANCELLED' || s.status === 'SKIPPED');
+
+  return (
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-surface-800 rounded-2xl border border-white/10 w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="p-5 border-b border-white/5 flex items-center justify-between">
+          <div>
+            <h3 className="font-black text-white text-base flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-brand-500 animate-pulse" />
+              {selectedZone ? `${meal.label} Delivery — ${selectedZone.name}` : `${meal.label} Delivery Zones`}
+            </h3>
+            <p className="text-xs text-white/40 mt-0.5">{selectedZone ? "Mark today's meal delivery checklist" : 'Choose an area to start delivery'}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedZone && <button onClick={() => { setSelectedZone(null); setStudents([]); setSearch(''); setTab('pending'); }} className="p-1 text-white/40 hover:text-white" title="All zones"><ChevronLeft size={19} /></button>}
+            <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl font-bold">×</button>
+          </div>
+        </div>
+
+        {selectedZone && <div className="p-4 bg-surface-900/40 border-b border-white/5 flex flex-col gap-3">
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-white/30">
+              <Search size={14} />
+            </span>
+            <input
+              type="text"
+              className="input-field text-xs py-2"
+              style={{ paddingLeft: '2.25rem' }}
+              placeholder="Search student..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-2 p-1 bg-surface-950 rounded-xl border border-white/5">
+            <button
+              onClick={() => setTab('pending')}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                tab === 'pending'
+                  ? 'bg-brand-500 text-white shadow'
+                  : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              Pending ({pending.length})
+            </button>
+            <button
+              onClick={() => setTab('completed')}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                tab === 'completed'
+                  ? 'bg-brand-500 text-white shadow'
+                  : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              Completed ({completed.length})
+            </button>
+          </div>
+        </div>}
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {!selectedZone ? (zonesLoading ? (
+            <div className="flex items-center justify-center py-12"><div className="w-8 h-8 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" /></div>
+          ) : zones.length === 0 ? (
+            <div className="text-center py-10 text-white/35"><MapPinned size={30} className="mx-auto mb-3 opacity-50" /><p className="text-sm">No delivery zones created</p><p className="text-xs mt-1">Create a zone and assign students before dispatching meals.</p></div>
+          ) : zones.map(zone => (
+            <button key={zone.id} onClick={() => setSelectedZone(zone)} className="w-full flex items-center gap-3 text-left p-4 rounded-xl border border-white/5 bg-white/5 hover:bg-brand-500/10 hover:border-brand-500/25 transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-brand-500/10 text-brand-400 flex items-center justify-center"><MapPinned size={18} /></div>
+              <div className="flex-1 min-w-0"><p className="font-semibold text-white text-sm">{zone.name}</p><p className="text-xs text-white/40 truncate mt-0.5">{zone.description || 'No delivery notes'}</p></div><span className="text-xs text-brand-400 font-semibold">{zone.student_count} students</span>
+            </button>
+          ))) : loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
+            </div>
+          ) : (tab === 'pending' ? pending : completed).length === 0 ? (
+            <p className="text-center text-white/30 text-xs py-8">No students found</p>
+          ) : (
+            (tab === 'pending' ? pending : completed).map(s => (
+              <div key={s.student_id} className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-white/5">
+                <span className="font-bold text-white text-sm">{s.name}</span>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2">
+                  {s.status === 'SKIPPED' ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                      Skipped
+                    </span>
+                  ) : s.status === 'SCHEDULED' ? (
+                    <>
+                      <button
+                        disabled={markingId === s.student_id}
+                        onClick={() => handleStatusUpdate(s.student_id, 'CANCELLED')}
+                        className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 flex items-center justify-center cursor-pointer transition-colors"
+                        title="Not Delivered"
+                      >
+                        <X size={14} />
+                      </button>
+                      <button
+                        disabled={markingId === s.student_id}
+                        onClick={() => handleStatusUpdate(s.student_id, 'SERVED')}
+                        className="w-8 h-8 rounded-lg bg-green-500/10 border border-green-500/20 text-green-500 hover:bg-green-500/20 flex items-center justify-center cursor-pointer transition-colors"
+                        title="Delivered"
+                      >
+                        <Check size={14} />
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      {s.status === 'SERVED' ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">
+                          Delivered
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                          Not Delivered
+                        </span>
+                      )}
+                      <button
+                        disabled={markingId === s.student_id}
+                        onClick={() => handleStatusUpdate(s.student_id, s.status === 'SERVED' ? 'CANCELLED' : 'SERVED')}
+                        className="text-[10px] text-brand-400 hover:underline cursor-pointer font-semibold"
+                      >
+                        Change Status
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

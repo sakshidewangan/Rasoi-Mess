@@ -1,19 +1,17 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Users, CalendarDays, CreditCard, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarDays, MapPinned } from 'lucide-react';
 
 const ownerNav = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Home' },
   { to: '/students',  icon: Users,           label: 'Students' },
   { to: '/calendar',  icon: CalendarDays,    label: 'Calendar' },
-  { to: '/payments',  icon: CreditCard,      label: 'Payments' },
-  { to: '/reports',   icon: BarChart3,       label: 'Reports' },
+  { to: '/zones',     icon: MapPinned,       label: 'Zones' },
 ];
 
 const studentNav = [
   { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/my-calendar', icon: CalendarDays,    label: 'Calendar' },
-  { to: '/my-balance',  icon: CreditCard,      label: 'Balance' },
 ];
 
 export default function BottomNav() {

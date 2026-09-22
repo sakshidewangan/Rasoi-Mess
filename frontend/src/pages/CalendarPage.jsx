@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../lib/api';
 import {
-  ArrowLeft, Coffee, Sun, Moon, Plus, CalendarDays,
-  Phone, Home, AlertCircle, CreditCard, PenLine
+  ArrowLeft, Coffee, Sun, Moon, Plus,
+  Phone, Home, AlertCircle, PenLine
 } from 'lucide-react';
 import { format, parse, addMonths, subMonths } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -124,17 +124,6 @@ export default function CalendarPage() {
     }
   };
 
-  const generateCalendar = async () => {
-    try {
-      await api.post('/calendar/generate', { student_id: parseInt(studentId), month: currentMonth });
-      toast.success('Calendar generated!');
-      const res = await api.get(`/calendar/${studentId}?month=${currentMonth}`);
-      setMeals(res.data);
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to generate');
-    }
-  };
-
   if (loading) return <div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" /></div>;
 
   const served = meals.filter(m => m.status === 'SERVED' || m.status === 'SCHEDULED');
@@ -167,11 +156,6 @@ export default function CalendarPage() {
 
       {/* Actions */}
       <div className="flex gap-2 flex-wrap">
-        {isOwner && (
-          <button onClick={generateCalendar} className="btn-secondary text-xs">
-            <CalendarDays size={14} /> Generate Month
-          </button>
-        )}
         <button onClick={() => setShowLeave(true)} className="btn-secondary text-xs">
           <Plus size={14} /> Add Leave
         </button>

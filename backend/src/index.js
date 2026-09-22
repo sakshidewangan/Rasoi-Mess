@@ -11,6 +11,9 @@ import paymentRoutes from './routes/payments.js';
 import expenseRoutes from './routes/expenses.js';
 import settingsRoutes from './routes/settings.js';
 import menuRoutes from './routes/menu.js';
+import excelRoutes from './routes/excel.js';
+import zoneRoutes from './routes/zones.js';
+import { syncToFirestore, backupDatabaseFile } from './db/backup.js';
 
 dotenv.config();
 
@@ -25,6 +28,11 @@ app.use(
   }),
 );
 app.use(express.json());
+
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -45,6 +53,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/menu", menuRoutes);
+app.use("/api/excel", excelRoutes);
+app.use("/api/zones", zoneRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -59,49 +69,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Internal server error" });
 });
 
-// Background task scheduler to auto-mark tiffins as served at 11:59 PM daily (IST / UTC+5:30)
-function scheduleDailyAutoServe() {
-  const now = new Date();
-  const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  
-  // Create a Date object for 11:59 PM today in IST representation (using UTC methods on offset date)
-  const targetIST = new Date(istNow);
-  targetIST.setUTCHours(23, 59, 0, 0);
-  
-  // If it's already past 11:59 PM today in IST, set for tomorrow 11:59 PM IST
-  if (istNow > targetIST) {
-    targetIST.setUTCDate(targetIST.getUTCDate() + 1);
-  }
-  
-  const delay = targetIST.getTime() - istNow.getTime();
-  const targetTimeStr = new Date(targetIST.getTime() - 5.5 * 60 * 60 * 1000).toLocaleString();
-  console.log(`[AutoServe Scheduler] Next daily serve update scheduled in ${(delay / 1000 / 60).toFixed(2)} minutes (at ${targetTimeStr} IST)`);
-  
-  setTimeout(async () => {
-    try {
-      const todayStr = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
-      console.log(`[AutoServe] Running daily auto-serve transition for date <= ${todayStr}...`);
-      
-      const res = await query(`
-        UPDATE daily_meal_calendar
-        SET status = 'SERVED', updated_at = NOW()
-        WHERE meal_date <= $1 AND status = 'SCHEDULED'
-      `, [todayStr]);
-      
-      console.log(`[AutoServe] Success! Marked ${res.rowCount} scheduled meals as SERVED.`);
-    } catch (err) {
-      console.error('[AutoServe] Error updating meals:', err);
-    }
-    
-    // Reschedule for next day
-    scheduleDailyAutoServe();
-  }, delay);
-}
-
 const startServer = (port) => {
   const server = app.listen(port, () => {
     console.log(`🚀 Rasoi API running on http://localhost:${port}`);
     console.log(`📡 Health check: http://localhost:${port}/api/health`);
+
+    // Attempt automatic backup/sync on start (asynchronous, doesn't block startup)
+    setTimeout(async () => {
+      console.log('⏰ Running startup automatic cloud backup...');
+      await syncToFirestore();
+      await backupDatabaseFile();
+    }, 5000);
   });
 
   server.on("error", (err) => {
@@ -118,4 +96,3 @@ const startServer = (port) => {
 };
 
 startServer(PORT);
-scheduleDailyAutoServe();

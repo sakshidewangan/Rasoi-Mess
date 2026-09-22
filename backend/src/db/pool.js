@@ -1,224 +1,232 @@
-import pg from 'pg';
-import dotenv from 'dotenv';
-import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import sqlite3 from 'sqlite3';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const { Pool } = pg;
+const dbPath = join(__dirname, '..', '..', 'rasoi_db.sqlite');
+console.log(`💾 SQLite Database Path: ${dbPath}`);
 
-let useSqlite = false;
-let sqliteDb = null;
-let pgPool = null;
-let sqliteWarned = false;
-
-// Simple mutex lock to serialize SQLite query/transaction access across requests
-let sqliteLock = Promise.resolve();
-
-const acquireLock = async () => {
-  const currentLock = sqliteLock;
-  let release;
-  sqliteLock = new Promise(resolve => {
-    release = resolve;
-  });
-  await currentLock;
-  return release;
-};
-
-// Initialize PostgreSQL pool
-try {
-  pgPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  });
-  
-  // We don't want the pool to crash the process on error
-  pgPool.on('error', (err) => {
-    console.error('Unexpected error on idle PG client', err);
-  });
-} catch (err) {
-  console.warn('❌ Failed to initialize PG pool, falling back to SQLite:', err.message);
-  useSqlite = true;
-}
-
-// Function to translate PostgreSQL query to SQLite query
-function translateSql(sql) {
-  if (!sql) return sql;
-  let s = sql;
-  
-  // Replace SERIAL PRIMARY KEY with INTEGER PRIMARY KEY AUTOINCREMENT
-  s = s.replace(/SERIAL PRIMARY KEY/gi, 'INTEGER PRIMARY KEY AUTOINCREMENT');
-  
-  // Replace ILIKE with LIKE
-  s = s.replace(/ILIKE/gi, 'LIKE');
-  
-  // Replace NOW() with datetime('now')
-  s = s.replace(/NOW\(\)/gi, "datetime('now')");
-  
-  // Replace TO_CHAR(col, 'YYYY-MM') with strftime('%Y-%m', col)
-  s = s.replace(/TO_CHAR\(([^,]+),\s*['"]YYYY-MM['"]\)/gi, "strftime('%Y-%m', $1)");
-  
-  // Translate parameters: $1, $2, ... -> ?1, ?2, ...
-  s = s.replace(/\$(\d+)/g, '?$1');
-  
-  return s;
-}
-
-// Initialize SQLite database
-function initSqlite() {
-  if (sqliteDb) return;
-  
-  const dbPath = join(__dirname, '../../rasoi_db.sqlite');
-  const isNew = !existsSync(dbPath);
-  
-  console.log(`🔌 Initializing SQLite database at ${dbPath}...`);
-  sqliteDb = new DatabaseSync(dbPath);
-  
-  // Enable foreign keys
-  sqliteDb.exec('PRAGMA foreign_keys = ON;');
-  
-  if (isNew) {
-    console.log('📝 Creating database schema in SQLite...');
-    try {
-      const schemaPath = join(__dirname, 'schema.sql');
-      const schemaSql = readFileSync(schemaPath, 'utf8');
-      
-      const translatedSchema = translateSql(schemaSql);
-      
-      sqliteDb.exec(translatedSchema);
-      console.log('✅ SQLite schema created and seeded successfully!');
-    } catch (err) {
-      console.error('❌ Failed to initialize SQLite schema:', err.message);
-    }
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('❌ Failed to connect to SQLite database:', err.message);
+  } else {
+    console.log('🔌 Connected to SQLite database.');
   }
+});
+
+// Enable WAL mode and foreign keys
+db.serialize(() => {
+  db.run("PRAGMA journal_mode = WAL;");
+  db.run("PRAGMA foreign_keys = ON;");
+});
+
+// ──────────────────────────────────────────────
+// SQL Translation: PostgreSQL → SQLite
+// ──────────────────────────────────────────────
+function translateSQL(sql, params = []) {
+  let q = sql;
+  q = q.replace(/\bSERIAL PRIMARY KEY\b/gi, 'INTEGER PRIMARY KEY AUTOINCREMENT');
+  q = q.replace(/::TEXT/gi, '');
+  q = q.replace(/::DATE/gi, '');
+  q = q.replace(/bool_or\((.*?)\)/gi, 'MAX($1)');
+  q = q.replace(/TO_CHAR\((.*?),\s*['"]YYYY-MM['"]\)/gi, "strftime('%Y-%m', $1)");
+  q = q.replace(/\bNOW\(\)/gi, 'CURRENT_TIMESTAMP');
+  q = q.replace(/\bILIKE\b/gi, 'LIKE');
+  // PostgreSQL permits reusing a placeholder (for example, $2) more than
+  // once. SQLite's anonymous `?` placeholders need a value for every
+  // occurrence, so duplicate the mapped parameter while translating.
+  const translatedParams = [];
+  q = q.replace(/\$(\d+)/g, (_, index) => {
+    translatedParams.push(params[Number(index) - 1]);
+    return '?';
+  });
+  return { sql: q, params: translatedParams.length ? translatedParams : params };
 }
 
-// Execute query on SQLite connection (expects lock to be held already)
-function runSqliteQueryInternal(text, params) {
-  initSqlite();
-  
-  const translatedText = translateSql(text);
-  const stmt = sqliteDb.prepare(translatedText);
-  
-  const sanitizedParams = params.map(val => {
-    if (val === undefined) return null;
-    if (typeof val === 'boolean') return val ? 1 : 0;
-    return val;
-  });
-  
-  const rows = stmt.all(...sanitizedParams);
-  
-  // Convert boolean values from 0/1 to true/false
-  const booleanColumns = [
-    'has_breakfast', 'has_lunch', 'has_dinner',
-    'skip_breakfast', 'skip_lunch', 'skip_dinner',
-    'is_locked', 'tiffin_box_returned', 'create_login'
-  ];
-  
-  // Convert date columns to Date objects to match node-pg behavior
-  const dateColumns = [
-    'joining_date', 'leaving_date', 'meal_date', 'payment_date',
-    'expense_date', 'effective_from', 'created_at', 'updated_at'
-  ];
-  
-  rows.forEach(row => {
-    booleanColumns.forEach(col => {
-      if (col in row) {
-        row[col] = row[col] === 1 || row[col] === true;
-      }
-    });
-    dateColumns.forEach(col => {
-      if (col in row && row[col] !== null && row[col] !== undefined) {
-        row[col] = new Date(row[col]);
-      }
-    });
-  });
-  
-  return { rows };
+// Determine the type of SQL statement
+function getQueryType(sql) {
+  const trimmed = sql.trim().toUpperCase();
+  if (trimmed.startsWith('SELECT'))  return 'SELECT';
+  if (trimmed.startsWith('INSERT'))  return 'INSERT';
+  if (trimmed.startsWith('UPDATE'))  return 'UPDATE';
+  if (trimmed.startsWith('DELETE'))  return 'DELETE';
+  if (trimmed.startsWith('BEGIN') || trimmed.startsWith('START')) return 'BEGIN';
+  if (trimmed.startsWith('COMMIT'))  return 'COMMIT';
+  if (trimmed.startsWith('ROLLBACK')) return 'ROLLBACK';
+  if (trimmed.startsWith('PRAGMA'))  return 'PRAGMA';
+  return 'OTHER';
 }
 
-// Check database connection and execute query
-export const query = async (text, params = []) => {
-  if (!useSqlite) {
-    try {
-      // Try querying PG
-      const res = await pgPool.query(text, params);
-      return res;
-    } catch (err) {
-      // If connection refused, switch to SQLite
-      if (err.code === 'ECONNREFUSED' || err.message.includes('connect ECONNREFUSED') || err.message.includes('connection')) {
-        if (!sqliteWarned) {
-          console.warn('⚠️ PostgreSQL connection refused. Switching to local SQLite fallback...');
-          sqliteWarned = true;
+// ──────────────────────────────────────────────
+// Core query function
+// ──────────────────────────────────────────────
+export const query = (text, params = [], dbInstance = db) => {
+  return new Promise((resolve, reject) => {
+    const { sql: translated, params: translatedParams } = translateSQL(text, params);
+    const type = getQueryType(text);
+
+    // Schema setup (multi-statement DDL — no params)
+    const isSchema = params.length === 0 &&
+      (translated.includes('CREATE TABLE') || translated.includes('PRAGMA'));
+
+    if (isSchema) {
+      dbInstance.exec(translated, (err) => {
+        if (err) {
+          console.error("❌ SQLite Exec Error:", err.message);
+          return reject(err);
         }
-        useSqlite = true;
-        initSqlite();
-      } else {
-        throw err;
-      }
+        resolve({ rows: [], rowCount: 0 });
+      });
+      return;
     }
-  }
-  
-  if (useSqlite) {
-    const release = await acquireLock();
-    try {
-      return runSqliteQueryInternal(text, params);
-    } finally {
-      release();
-    }
-  }
-};
 
-const pool = {
-  connect: async () => {
-    if (!useSqlite) {
-      try {
-        const client = await pgPool.connect();
-        return client;
-      } catch (err) {
-        if (err.code === 'ECONNREFUSED' || err.message.includes('connect ECONNREFUSED') || err.message.includes('connection')) {
-          if (!sqliteWarned) {
-            console.warn('⚠️ PostgreSQL connection refused. Switching to local SQLite fallback...');
-            sqliteWarned = true;
+    // Transaction control statements
+    if (type === 'BEGIN' || type === 'COMMIT' || type === 'ROLLBACK') {
+      dbInstance.run(translated, [], function (err) {
+        if (err) {
+          // SQLite is already in correct state — ignore benign errors
+          if (err.message.includes('cannot start a transaction') ||
+              err.message.includes('no transaction is active')) {
+            return resolve({ rows: [], rowCount: 0 });
           }
-          useSqlite = true;
-          initSqlite();
-        } else {
-          throw err;
+          return reject(err);
         }
-      }
+        resolve({ rows: [], rowCount: 0 });
+      });
+      return;
     }
-    
-    // SQLite Client mock with inherited database lock
-    const releaseLock = await acquireLock();
-    return {
-      query: async (text, params = []) => {
-        return runSqliteQueryInternal(text, params);
-      },
-      release: () => {
-        releaseLock();
+
+    // SELECT queries
+    if (type === 'SELECT') {
+      dbInstance.all(translated, translatedParams, (err, rows) => {
+        if (err) {
+          console.error("❌ SQLite Query Error:", err.message);
+          console.error("Original SQL:", text);
+          console.error("Translated SQL:", translated);
+          console.error("Parameters:", params);
+          return reject(err);
+        }
+        resolve({ rows: rows || [], rowCount: rows ? rows.length : 0 });
+      });
+      return;
+    }
+
+    // SQLite supports RETURNING natively. Use it directly so a write and the
+    // returned row are one atomic operation. The former last-insert-id lookup
+    // could occasionally return no row under concurrent requests.
+    const hasReturning = /\bRETURNING\b/i.test(translated);
+    if (hasReturning) {
+      dbInstance.all(translated, translatedParams, (err, rows) => {
+        if (err) {
+          console.error("❌ SQLite Query Error:", err.message);
+          console.error("Original SQL:", text);
+          console.error("Translated SQL:", translated);
+          console.error("Parameters:", params);
+          return reject(err);
+        }
+        resolve({ rows: rows || [], rowCount: rows ? rows.length : 0 });
+      });
+      return;
+    }
+
+    // INSERT / UPDATE / DELETE without RETURNING
+    const sqlWithoutReturning = translated.replace(/\s+RETURNING\s+\*\s*$/i, '').trim();
+
+    dbInstance.run(sqlWithoutReturning, translatedParams, function (err) {
+      if (err) {
+        console.error("❌ SQLite Query Error:", err.message);
+        console.error("Original SQL:", text);
+        console.error("Translated SQL:", translated);
+        console.error("Parameters:", params);
+        return reject(err);
       }
-    };
-  },
+
+      if (!hasReturning) {
+        resolve({ rows: [], rowCount: this.changes });
+        return;
+      }
+
+      // Fetch the affected row(s) after write
+      let fetchSQL;
+      if (type === 'INSERT') {
+        const lastId = this.lastID;
+        // Detect which table was inserted into
+        const tableMatch = sqlWithoutReturning.match(/INSERT\s+INTO\s+(\w+)/i);
+        if (tableMatch) {
+          fetchSQL = `SELECT * FROM ${tableMatch[1]} WHERE id = ${lastId}`;
+        }
+      } else if (type === 'UPDATE') {
+        // Extract WHERE clause from the update statement to refetch the row
+        const tableMatch = sqlWithoutReturning.match(/UPDATE\s+(\w+)/i);
+        const whereMatch = sqlWithoutReturning.match(/WHERE\s+(.+)$/i);
+        if (tableMatch && whereMatch) {
+          fetchSQL = `SELECT * FROM ${tableMatch[1]} WHERE ${whereMatch[1]}`;
+        }
+      } else if (type === 'DELETE') {
+        resolve({ rows: [], rowCount: this.changes });
+        return;
+      }
+
+      if (!fetchSQL) {
+        resolve({ rows: [], rowCount: this.changes });
+        return;
+      }
+
+      dbInstance.all(fetchSQL, translatedParams.slice(translatedParams.length - (fetchSQL.match(/\?/g) || []).length), (fetchErr, rows) => {
+        if (fetchErr) {
+          // Non-fatal: return empty rows but don't crash
+          console.warn("⚠️ RETURNING fetch failed:", fetchErr.message);
+          resolve({ rows: [], rowCount: this.changes });
+          return;
+        }
+        resolve({ rows: rows || [], rowCount: rows ? rows.length : 0 });
+      });
+    });
+  });
+};
+
+// ──────────────────────────────────────────────
+// Transaction-aware client
+// ──────────────────────────────────────────────
+const pool = {
+  connect: async () => new Promise((resolve, reject) => {
+    // Transactions must not share the module-level SQLite connection. Two
+    // concurrent requests could otherwise join or roll back each other's work.
+    const connection = new sqlite3.Database(dbPath, (err) => {
+      if (err) return reject(err);
+
+      connection.serialize(() => {
+        connection.run('PRAGMA foreign_keys = ON;');
+        connection.run('PRAGMA busy_timeout = 5000;');
+      });
+
+      let released = false;
+      resolve({
+        query: (text, params = []) => query(text, params, connection),
+        release: () => {
+          if (released) return;
+          released = true;
+          connection.close((closeErr) => {
+            if (closeErr) console.error('❌ Failed to close SQLite transaction connection:', closeErr.message);
+          });
+        }
+      });
+    });
+  }),
   query: async (text, params = []) => {
-    return query(text, params);
+    return query(text, params, db);
   },
-  on: (event, handler) => {
-    if (pgPool) {
-      pgPool.on(event, handler);
-    }
-  },
+  on: () => {},
   end: async () => {
-    if (pgPool) {
-      await pgPool.end();
-    }
+    return new Promise((resolve, reject) => {
+      db.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
   }
 };
 
 export default pool;
-

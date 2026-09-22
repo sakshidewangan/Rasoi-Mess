@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { UserPlus, ArrowLeft, Coffee, Sun, Moon } from 'lucide-react';
@@ -7,19 +7,29 @@ import toast from 'react-hot-toast';
 export default function AddStudentPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const submitInFlight = useRef(false);
+  const [zones, setZones] = useState([]);
   const [form, setForm] = useState({
     name: '', mobile: '', guardian_mobile: '', college: '',
     hostel: '', room_number: '', veg_status: 'VEG',
     joining_date: new Date().toISOString().split('T')[0],
-    academic_session: '2025-26', credit_limit: 1000,
+    academic_session: '2025-26',
     has_breakfast: true, has_lunch: true, has_dinner: true,
-    remarks: '', create_login: false, password: '',
+    remarks: '', create_login: false, password: '', delivery_zone_id: '',
   });
+
+  useEffect(() => {
+    api.get('/zones').then(res => setZones(res.data)).catch(() => {});
+  }, []);
 
   const set = (key, val) => setForm(p => ({ ...p, [key]: val }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // State updates are asynchronous, so a rapid double-click can otherwise
+    // send two requests before the button becomes disabled.
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     setLoading(true);
     try {
       await api.post('/students', form);
@@ -28,6 +38,7 @@ export default function AddStudentPage() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to add student');
     } finally {
+      submitInFlight.current = false;
       setLoading(false);
     }
   };
@@ -77,6 +88,14 @@ export default function AddStudentPage() {
             </div>
           </div>
           <div>
+            <label className="label">Delivery Zone</label>
+            <select className="input-field cursor-pointer" value={form.delivery_zone_id} onChange={e => set('delivery_zone_id', e.target.value ? Number(e.target.value) : '')}>
+              <option value="">Unassigned — select later</option>
+              {zones.map(zone => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
+            </select>
+            {zones.length === 0 && <p className="text-[11px] text-white/30 mt-1">Create zones from the Zones section to assign students.</p>}
+          </div>
+          <div>
             <label className="label">College / Institute</label>
             <input className="input-field" placeholder="College name" value={form.college} onChange={e => set('college', e.target.value)} />
           </div>
@@ -108,15 +127,9 @@ export default function AddStudentPage() {
         {/* Mess Details */}
         <div className="card p-4 space-y-3">
           <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider">Mess Details</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Joining Date *</label>
-              <input className="input-field" type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} required />
-            </div>
-            <div>
-              <label className="label">Credit Limit (₹)</label>
-              <input className="input-field" type="number" inputMode="numeric" value={form.credit_limit} onChange={e => set('credit_limit', e.target.value)} />
-            </div>
+          <div>
+            <label className="label">Joining Date *</label>
+            <input className="input-field" type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} required />
           </div>
           <div>
             <label className="label mb-2">Default Meal Plan</label>

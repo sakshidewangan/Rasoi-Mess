@@ -59,11 +59,6 @@ function StudentCard({ student, onStatusChange, isCalendarView }) {
                 {label}
               </span>
             ))}
-            {student.current_balance > 0 && (
-              <span className="ml-auto text-xs font-semibold text-red-400">
-                Due: ₹{parseFloat(student.current_balance).toLocaleString('en-IN')}
-              </span>
-            )}
           </div>
         </div>
 

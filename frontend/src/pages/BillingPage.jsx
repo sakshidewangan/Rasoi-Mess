@@ -83,9 +83,7 @@ export default function BillingPage() {
                     <p className={`text-sm font-medium ${cls}`}>{label}</p>
                     <p className="text-xs text-white/30">{taken} served · {skipped} skipped</p>
                   </div>
-                  <p className="text-sm font-bold text-white">
-                    ₹{(bill[`${key}_amount`] ?? (taken * 0)).toLocaleString('en-IN')}
-                  </p>
+                  <p className="text-sm font-bold text-white">₹{Number(bill[`${key}_amount`] ?? 0).toLocaleString('en-IN')}</p>
                 </div>
               );
             })}

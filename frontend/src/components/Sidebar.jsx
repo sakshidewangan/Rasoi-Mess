@@ -2,27 +2,24 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Users, CalendarDays, LogOut,
-  UtensilsCrossed, CreditCard, TrendingDown, BarChart3,
-  Settings, FileText, X, ChefHat
+  UtensilsCrossed,
+  Settings, X, ChefHat, ClipboardList, MapPinned
 } from 'lucide-react';
 
 const ownerNav = [
   { to: '/dashboard',  icon: LayoutDashboard,  label: 'Dashboard' },
   { to: '/students',   icon: Users,             label: 'Students' },
+  { to: '/zones',      icon: MapPinned,         label: 'Zones' },
   { to: '/calendar',   icon: CalendarDays,      label: 'Meal Calendar' },
   { to: '/kitchen',    icon: UtensilsCrossed,   label: 'Kitchen Sheet' },
   { to: '/daily-menu', icon: ChefHat,           label: 'Daily Menu' },
-  { to: '/billing',    icon: FileText,           label: 'Billing' },
-  { to: '/payments',   icon: CreditCard,         label: 'Payments' },
-  { to: '/expenses',   icon: TrendingDown,       label: 'Expenses' },
-  { to: '/reports',    icon: BarChart3,          label: 'Reports' },
+  { to: '/daily-records', icon: ClipboardList,  label: 'Daily Records' },
   { to: '/settings',   icon: Settings,           label: 'Settings' },
 ];
 
 const studentNav = [
   { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/my-calendar', icon: CalendarDays,    label: 'My Calendar' },
-  { to: '/my-balance',  icon: CreditCard,      label: 'My Balance' },
 ];
 
 export default function Sidebar({ open, onClose }) {

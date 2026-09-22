@@ -110,18 +110,170 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/leaves/:studentId — get all leaves for a student
+// GET /api/leaves/:studentId — get all leaves/skips for a student (merged Leave History)
 router.get('/:studentId', authenticate, async (req, res) => {
   try {
     const { studentId } = req.params;
     if (req.user.role === 'STUDENT' && req.user.studentId !== parseInt(studentId)) {
       return res.status(403).json({ message: 'Access denied' });
     }
-    const result = await query(`
-      SELECT * FROM leaves_and_pauses WHERE student_id = $1 ORDER BY start_date DESC
+
+    const leavesRes = await query(`
+      SELECT 
+        id, student_id, 
+        start_date::TEXT as start_date, 
+        end_date::TEXT as end_date, 
+        skip_breakfast, skip_lunch, skip_dinner, 
+        reason, created_by, created_at
+      FROM leaves_and_pauses 
+      WHERE student_id = $1 
+      ORDER BY created_at ASC
     `, [studentId]);
-    res.json(result.rows);
+
+    const skipsRes = await query(`
+      SELECT 
+        meal_date::TEXT as meal_date,
+        bool_or(meal_type = 'BREAKFAST') as skip_breakfast,
+        bool_or(meal_type = 'LUNCH') as skip_lunch,
+        bool_or(meal_type = 'DINNER') as skip_dinner
+      FROM meal_skip_log
+      WHERE student_id = $1 AND initiated_by = 'STUDENT_SELF'
+      GROUP BY meal_date
+      ORDER BY meal_date ASC
+    `, [studentId]);
+
+    const dayMap = {}; // key: YYYY-MM-DD, value: { date, skip_breakfast, skip_lunch, skip_dinner, reason, is_leave, created_at, id }
+
+    const addDays = (dateStr, days) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      date.setDate(date.getDate() + days);
+      const ry = date.getFullYear();
+      const rm = String(date.getMonth() + 1).padStart(2, '0');
+      const rd = String(date.getDate()).padStart(2, '0');
+      return `${ry}-${rm}-${rd}`;
+    };
+
+    const getDatesInRange = (startDate, endDate) => {
+      const dates = [];
+      let curr = startDate;
+      while (curr <= endDate) {
+        dates.push(curr);
+        curr = addDays(curr, 1);
+      }
+      return dates;
+    };
+
+    // Process actual leaves (sorted ASC, so newer leaves process last and override reason)
+    leavesRes.rows.forEach(r => {
+      const dates = getDatesInRange(r.start_date, r.end_date);
+      dates.forEach(date => {
+        const leaveReason = r.reason || 'on leave';
+        if (!dayMap[date]) {
+          dayMap[date] = {
+            date,
+            skip_breakfast: !!r.skip_breakfast,
+            skip_lunch: !!r.skip_lunch,
+            skip_dinner: !!r.skip_dinner,
+            reason: leaveReason,
+            is_leave: true,
+            created_at: r.created_at,
+            id: r.id
+          };
+        } else {
+          const existing = dayMap[date];
+          existing.skip_breakfast = existing.skip_breakfast || !!r.skip_breakfast;
+          existing.skip_lunch = existing.skip_lunch || !!r.skip_lunch;
+          existing.skip_dinner = existing.skip_dinner || !!r.skip_dinner;
+          existing.reason = leaveReason; // later leave overrides earlier
+          existing.is_leave = true;
+          existing.created_at = r.created_at;
+          existing.id = r.id;
+        }
+      });
+    });
+
+    // Process student skips
+    skipsRes.rows.forEach(r => {
+      const date = r.meal_date;
+      if (!dayMap[date]) {
+        dayMap[date] = {
+          date,
+          skip_breakfast: !!r.skip_breakfast,
+          skip_lunch: !!r.skip_lunch,
+          skip_dinner: !!r.skip_dinner,
+          reason: 'Skipped by User',
+          is_leave: false,
+          created_at: null,
+          id: null
+        };
+      } else {
+        const existing = dayMap[date];
+        existing.skip_breakfast = existing.skip_breakfast || !!r.skip_breakfast;
+        existing.skip_lunch = existing.skip_lunch || !!r.skip_lunch;
+        existing.skip_dinner = existing.skip_dinner || !!r.skip_dinner;
+        // Skip does not override active leave reason
+        if (!existing.is_leave) {
+          existing.reason = 'Skipped by User';
+        }
+      }
+    });
+
+    // Reconstruct consecutive day blocks back into ranges
+    const sortedDates = Object.keys(dayMap).sort();
+    const ranges = [];
+    let currentRange = null;
+
+    sortedDates.forEach(date => {
+      const dayData = dayMap[date];
+
+      if (!currentRange) {
+        currentRange = {
+          id: dayData.id || `merged-${date}`,
+          student_id: parseInt(studentId),
+          start_date: date,
+          end_date: date,
+          skip_breakfast: dayData.skip_breakfast,
+          skip_lunch: dayData.skip_lunch,
+          skip_dinner: dayData.skip_dinner,
+          reason: dayData.reason
+        };
+      } else {
+        const expectedNextDate = addDays(currentRange.end_date, 1);
+        if (
+          date === expectedNextDate &&
+          currentRange.skip_breakfast === dayData.skip_breakfast &&
+          currentRange.skip_lunch === dayData.skip_lunch &&
+          currentRange.skip_dinner === dayData.skip_dinner &&
+          currentRange.reason === dayData.reason
+        ) {
+          currentRange.end_date = date;
+        } else {
+          ranges.push(currentRange);
+          currentRange = {
+            id: dayData.id || `merged-${date}`,
+            student_id: parseInt(studentId),
+            start_date: date,
+            end_date: date,
+            skip_breakfast: dayData.skip_breakfast,
+            skip_lunch: dayData.skip_lunch,
+            skip_dinner: dayData.skip_dinner,
+            reason: dayData.reason
+          };
+        }
+      }
+    });
+
+    if (currentRange) {
+      ranges.push(currentRange);
+    }
+
+    // Sort final history list reverse chronologically (newest first)
+    ranges.sort((a, b) => b.start_date.localeCompare(a.start_date));
+
+    res.json(ranges);
   } catch (err) {
+    console.error('Error fetching leaves summary for student:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
